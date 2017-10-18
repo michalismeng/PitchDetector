@@ -11,6 +11,7 @@
     <OutputPath>.</OutputPath>
     <Name>PitchDetector</Name>
     <RootNamespace>PitchDetector</RootNamespace>
+    <InterpreterId>Global|PythonCore|2.7-32</InterpreterId>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
     <DebugSymbols>true</DebugSymbols>
@@ -21,7 +22,13 @@
     <EnableUnmanagedDebugging>false</EnableUnmanagedDebugging>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="note_frequencies.py">
+      <SubType>Code</SubType>
+    </Compile>
     <Compile Include="PitchDetector.py" />
+  </ItemGroup>
+  <ItemGroup>
+    <InterpreterReference Include="Global|PythonCore|2.7-32" />
   </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v$(VisualStudioVersion)\Python Tools\Microsoft.PythonTools.targets" />
   <!-- Uncomment the CoreCompile target to enable the Build command in
