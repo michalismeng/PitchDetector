@@ -78,6 +78,7 @@ namespace PitchDetectorAndroid
             for (int i = 0; i < windowSize; i++)
                 timeVector.Add((double)i / sampleRate);
 
+            Window.AddFlags(Android.Views.WindowManagerFlags.KeepScreenOn);
         }
 
         Thread CreateAudioThread()
@@ -104,7 +105,7 @@ namespace PitchDetectorAndroid
 
                 // TODO: Add gauss window and check out frequency leaking
                 // TODO: Investigate filter
-                var filter = MathNet.Filtering.IIR.OnlineIirFilter.CreateLowpass(MathNet.Filtering.ImpulseResponse.Finite, sampleRate, 1000, 50);
+                var filter = MathNet.Filtering.IIR.OnlineIirFilter.CreateLowpass(MathNet.Filtering.ImpulseResponse.Finite, sampleRate, 1000, 100);
                 input = filter.ProcessSamples(buffer.Select(i => (double)i).ToArray()).Select(o => new Complex(o, 0)).ToArray();
 
                 double[] g_window = MathNet.Numerics.Window.Gauss(windowSize, 1);
@@ -115,6 +116,9 @@ namespace PitchDetectorAndroid
                 // FFT input buffer and get the right frequencies
                 MathNet.Numerics.IntegralTransforms.Fourier.Radix2Forward(input);
                 double[] freqs = MathNet.Numerics.IntegralTransforms.Fourier.FrequencyScale(windowSize, sampleRate);
+
+                if (input.Max(i => i.Real) < 10000)     // fourier threshold to reject noise
+                    continue;
 
                 // calculate autocorrelation
                 Complex[] autocor = new Complex[windowSize];
@@ -145,15 +149,33 @@ namespace PitchDetectorAndroid
 
                 double max_freq = 1.0 / timeVector[max];
 
-                // TODO: Add a fourier absolute value threshold to reject noise (autocorrelation)
                 if (max_freq > 50 && max_freq < 2000)
                 {
-                    var pair = NoteFrequencies.GetNoteByFrequency(max_freq);
-                    RunOnUiThread(() => txtNote.Text = $"Note detected {pair.Key}.\nFrequency: {max_freq} Hz.\nDifference {pair.Value.ToString("N3")}");
+                    KeyValuePair<string, double> pair = NoteFrequencies.GetNoteByFrequency(max_freq);
+                    pair = new KeyValuePair<string, double>(pair.Key, -pair.Value);
 
-                    //Log.Info("buffer retrieved", $"max at: {max}, time: {timeVector[max]} frequency = {max_freq} Hz");
-                    Log.Info("Note", $"Note detected {pair.Key}. Frequency: {max_freq} Hz. Difference {pair.Value.ToString("N3")}");
-                    //Log.Info("timer", $"Function required: {(DateTime.Now - start).TotalMilliseconds} ms");
+                    string characteristic = "OK";
+
+                    int noteIndex = NoteFrequencies._Notes.FindIndex(n => n.Name == pair.Key);
+                    Note noteEstimation = NoteFrequencies._Notes[noteIndex]; 
+                    Note nextNote = NoteFrequencies._Notes[noteIndex + 1 * Math.Sign(pair.Value)];
+
+                    double threshold = Math.Sign(pair.Value) * (nextNote.Frequency - noteEstimation.Frequency) / 6;
+                    double successPercent = (pair.Value / Math.Abs((nextNote.Frequency - noteEstimation.Frequency)) * 100);
+
+                    if (pair.Value > 0)
+                        if (max_freq > noteEstimation.Frequency + threshold)           // played note frequency is above the limit.
+                            characteristic = "+";
+                    else
+                        if (max_freq < noteEstimation.Frequency - threshold)           // played note is below the limit
+                            characteristic = "-";
+
+                    //if (Math.Sign(pair.Value) * (max_freq - noteEstimation.Frequency) > middle)  // played note is above - below limit
+                    //    characteristic = Math.Sign(pair.Value).ToString();
+
+
+                    RunOnUiThread(() => txtNote.Text = $"Note detected {pair.Key}.\n {characteristic}.\nDifference {successPercent.ToString("N3")}%");
+                    Log.Info("Note", $"Note detected {pair.Key},{noteEstimation.Frequency}Hz. Frequency: {max_freq} Hz. {characteristic}. Difference {pair.Value.ToString("N3")}");
                 }
             }
         }
