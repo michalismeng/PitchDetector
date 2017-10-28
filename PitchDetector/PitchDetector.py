@@ -7,7 +7,7 @@ import time
 from note_frequencies import notes
 
 windowSize = 1024
-samplingRate = 20000
+samplingRate = 5000
 
 class MicrophoneRecorder:
     def __init__(self, r=samplingRate, w=windowSize):      # good for piano: 5000, 1024.... for violin 20000,1024
@@ -101,11 +101,11 @@ class PitchDetector:
                 freq_max = 1000/time_max;
             
                 if freq_max > 50:
-                    p3 = [float(maximum - 1), 1000/self.time[maximum - 1]]
-                    p2 = [float(maximum    ), 1000/self.time[maximum    ]]
-                    p1 = [float(maximum + 1), 1000/self.time[maximum + 1]]
+                    p3 = [1000/self.time[maximum - 1], result[maximum - 1]]
+                    p2 = [1000/self.time[maximum    ], result[maximum    ]]
+                    p1 = [1000/self.time[maximum + 1], result[maximum + 1]]
 
-                    interpol_max = self.quadratic_maximum(1000/self.time[maximum - 1], 1000/self.time[maximum    ], 1000/self.time[maximum + 1])
+                    interpol_max = self.quadratic_maximum(p1, p2, p3)
                 
                     print 'maximum at: ', freq_max, ' Hz, Note: ', self.getNoteFromFrequency(freq_max)
                     print 'interpol max: ', interpol_max, ' Hz, Note: ', self.getNoteFromFrequency(interpol_max)
@@ -114,18 +114,14 @@ class PitchDetector:
         temp_notes = {k: abs(v - freq) for k, v in notes.items()}
         return min(temp_notes, key=temp_notes.get)
 
-    def quadratic_maximum(self, a, b, c):
-        peakvalue = b + 0.5 * (0.5 * ((c - a) * (c - a))) / (2 * b - a - c)
-        return 2 * peakvalue;
-        
-        #_a = p1[1]/((p1[0]-p2[0])*(p1[0]-p3[0])) + p2[1]/((p2[0]-p1[0])*(p2[0]-p3[0])) + p3[1]/((p3[0]-p1[0])*(p3[0]-p2[0]))
-        #if _a == 0:
-        #    return 0
-        #_b = -p1[1]*(p2[0] + p3[0])/((p1[0]-p2[0])*(p1[0]-p3[0])) - p2[1]*(p3[0] + p1[0])/((p2[0]-p1[0])*(p2[0]-p3[0])) - p3[1]*(p1[0] + p2[0])/((p3[0]-p1[0])*(p3[0]-p2[0]))
-        #_c = p1[1]*p2[0]*p3[0]/((p1[0]-p2[0])*(p1[0]-p3[0])) + p2[1]*p3[0]*p1[0]/((p2[0]-p1[0])*(p2[0]-p3[0])) + p3[1]*p1[0]*p2[0]/((p3[0]-p1[0])*(p3[0]-p2[0]))
-        #max_val = -_b/(2*_a)
-        #print _a, _b, _c
-        #return _a * max_val**2 + _b * max_val + _c
+    def quadratic_maximum(self, p1, p2, p3):       
+        _a = p1[1]/((p1[0]-p2[0])*(p1[0]-p3[0])) + p2[1]/((p2[0]-p1[0])*(p2[0]-p3[0])) + p3[1]/((p3[0]-p1[0])*(p3[0]-p2[0]))
+        if _a == 0:
+            return 0
+        _b = -p1[1]*(p2[0] + p3[0])/((p1[0]-p2[0])*(p1[0]-p3[0])) - p2[1]*(p3[0] + p1[0])/((p2[0]-p1[0])*(p2[0]-p3[0])) - p3[1]*(p1[0] + p2[0])/((p3[0]-p1[0])*(p3[0]-p2[0]))
+        _c = p1[1]*p2[0]*p3[0]/((p1[0]-p2[0])*(p1[0]-p3[0])) + p2[1]*p3[0]*p1[0]/((p2[0]-p1[0])*(p2[0]-p3[0])) + p3[1]*p1[0]*p2[0]/((p3[0]-p1[0])*(p3[0]-p2[0]))
+        max_val = -_b/(2*_a)
+        return max_val#_a * max_val**2 + _b * max_val + _c
 
 window = PitchDetector()
 while True:

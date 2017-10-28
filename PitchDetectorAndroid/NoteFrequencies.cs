@@ -47,16 +47,14 @@ namespace PitchDetectorAndroid
         {
             return new Note(s.Key, s.Value);
         }
+
+        public static Note EmptyNote => new Note("", 0);
     }
 
     public static class NoteFrequencies
     {
         public static Note GetNoteByFrequency(double freq)
         {
-            //var tempNotes = Notes.Select(n => new KeyValuePair<string, (double, double)>(n.Key, (Math.Abs(n.Value - freq), n.Value - freq)));
-            //var minElement = tempNotes.Aggregate((l, r) => l.Value.Item1 < r.Value.Item1 ? l : r);
-            //return new KeyValuePair<string, double>(minElement.Key, minElement.Value.Item2);
-
             var tempNotes = _Notes.Select(n => new KeyValuePair<string, (double, double)>(n.Name, (Math.Abs(n.Frequency - freq), n.Frequency - freq)));
             var minElement = tempNotes.Aggregate((l, r) => l.Value.Item1 < r.Value.Item1 ? l : r);
             return new Note(minElement.Key, minElement.Value.Item2);
