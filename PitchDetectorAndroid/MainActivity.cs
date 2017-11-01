@@ -18,9 +18,10 @@ namespace PitchDetectorAndroid
         Thread pitchThread;
         AudioRecord record;
 
-        const int windowSize = 4096;
+        const int windowSize = 2048;
         const int sampleRate = 44100;
         const double maxVal = 2;
+        readonly int notesMemory = 5;
 
         private bool shouldContinue = true;
 
@@ -30,6 +31,8 @@ namespace PitchDetectorAndroid
         private List<double> timeVector = new List<double>(windowSize);
 
         private TextView txtNote;
+
+        private List<(Note, double)> notesPlayed = new List<(Note, double)>();
 
         #region Audio buffer queue sync function
 
@@ -95,14 +98,14 @@ namespace PitchDetectorAndroid
             return pitchThread;
         }
 
-        (Note, double) DetectPitch(short[] buffer)
+        (Note, double) DetectPitch(double[] buffer)
         {
             Complex[] input = new Complex[buffer.Length];
 
             // TODO: Add gauss window and check out frequency leaking
             // TODO: Investigate filter
             var filter = MathNet.Filtering.IIR.OnlineIirFilter.CreateLowpass(MathNet.Filtering.ImpulseResponse.Finite, sampleRate, 1000, 100);
-            input = filter.ProcessSamples(buffer.Select(i => (double)i).ToArray()).Select(o => new Complex(o, 0)).ToArray();
+            input = filter.ProcessSamples(buffer).Select(o => new Complex(o, 0)).ToArray();
 
             double[] g_window = MathNet.Numerics.Window.Gauss(windowSize, 1);
 
@@ -147,6 +150,9 @@ namespace PitchDetectorAndroid
                 if (result[i] > result[max])
                     max = i;
 
+            if (max - 1 < 0 || max + 1 >= result.Length)
+                return (Note.EmptyNote, 0);
+
             double[] p3 = { 1.0 / timeVector[max - 1], result[max - 1] };
             double[] p2 = { 1.0 / timeVector[max], result[max] };
             double[] p1 = { 1.0 / timeVector[max + 1], result[max + 1] };
@@ -174,7 +180,11 @@ namespace PitchDetectorAndroid
         {
             while (true)
             {
-                short[] buffer = GetBuffer();
+                short[] temp = GetBuffer();
+                double[] buffer = temp.Select(i => (double)i).ToArray();
+
+                var median = MathNet.Filtering.Median.OnlineMedianFilter.CreateDenoise(7);
+                buffer = median.ProcessSamples(buffer);
 
                 var result = DetectPitch(buffer);
 
@@ -184,7 +194,10 @@ namespace PitchDetectorAndroid
 
                 string characteristic = "OK";
                 if (noteEstimation.Frequency == 0)
+                {
+                    ClearNotes();
                     continue;
+                }
 
                 int noteIndex = NoteFrequencies._Notes.FindIndex(n => n.Name == noteEstimation.Name);
                 Note nextNote = NoteFrequencies._Notes[noteIndex + 1 * Math.Sign(difference)];
@@ -199,8 +212,13 @@ namespace PitchDetectorAndroid
                     if (actualFreq < noteEstimation.Frequency - threshold)           // played note is below the limit
                         characteristic = "-";
 
-                RunOnUiThread(() => txtNote.Text = $"Note detected {noteEstimation.Name}.\n {characteristic}.\nDifference {successPercent.ToString("N3")}%");
-                Log.Info("Note", $"Note detected {noteEstimation.Name},{noteEstimation.Frequency}Hz. Frequency: {actualFreq} Hz. {characteristic}. Difference {difference.ToString("N3")}");
+                // when the note vector reaches the given memory size, calculate median and print results
+                if(AppendNote((noteEstimation, actualFreq)))
+                {
+                    double meanFreq = GetNotesMedian();
+                    ClearNotes();
+                    RunOnUiThread(() => txtNote.Text = $"Note detected {noteEstimation.Name} {meanFreq.ToString("N1")}.\n {characteristic}.\nDifference {successPercent.ToString("N3")}%");
+                }
             }
         }
 
@@ -213,6 +231,31 @@ namespace PitchDetectorAndroid
             double c = p1[1] * p2[0] * p3[0] / ((p1[0] - p2[0]) * (p1[0] - p3[0])) + p2[1] * p3[0] * p1[0] / ((p2[0] - p1[0]) * (p2[0] - p3[0])) + p3[1] * p1[0] * p2[0] / ((p3[0] - p1[0]) * (p3[0] - p2[0]));
             double max_val = -b / (2 * a);
             return max_val;
+        }
+
+        bool AppendNote((Note, double) n)
+        {
+            notesPlayed.Add(n);
+
+            if (notesPlayed.Count > notesMemory)
+                return true;
+
+            return false;
+        }
+
+        void ClearNotes()
+        {
+            notesPlayed.Clear();
+        }
+
+        double GetNotesMedian()
+        {
+            notesPlayed.Sort((n1, n2) => n1.Item2 > n2.Item2 ? 1 : -1);
+
+            if (notesMemory % 2 == 0)
+                return (notesPlayed[notesMemory / 2].Item2 + notesPlayed[notesMemory / 2 + 1].Item2) / 2;
+            else
+                return notesPlayed[notesPlayed.Count / 2 + 1].Item2;
         }
        
 

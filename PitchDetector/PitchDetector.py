@@ -1,13 +1,15 @@
 import numpy as np
+from timeit import timeit
+from threading import Timer
 import pyaudio
 import threading
 import atexit
 import scipy.signal as signal
 import time
-from note_frequencies import notes
+from note_frequencies import notes    
 
 windowSize = 1024
-samplingRate = 5000
+samplingRate = 10000
 
 class MicrophoneRecorder:
     def __init__(self, r=samplingRate, w=windowSize):      # good for piano: 5000, 1024.... for violin 20000,1024
@@ -59,6 +61,7 @@ class PitchDetector:
 
         self._thread = threading.Thread(target = self.add_data)
         self._thread.start()
+
 
     def init(self):
         mic = MicrophoneRecorder()
@@ -121,7 +124,7 @@ class PitchDetector:
         _b = -p1[1]*(p2[0] + p3[0])/((p1[0]-p2[0])*(p1[0]-p3[0])) - p2[1]*(p3[0] + p1[0])/((p2[0]-p1[0])*(p2[0]-p3[0])) - p3[1]*(p1[0] + p2[0])/((p3[0]-p1[0])*(p3[0]-p2[0]))
         _c = p1[1]*p2[0]*p3[0]/((p1[0]-p2[0])*(p1[0]-p3[0])) + p2[1]*p3[0]*p1[0]/((p2[0]-p1[0])*(p2[0]-p3[0])) + p3[1]*p1[0]*p2[0]/((p3[0]-p1[0])*(p3[0]-p2[0]))
         max_val = -_b/(2*_a)
-        return max_val#_a * max_val**2 + _b * max_val + _c
+        return max_val
 
 window = PitchDetector()
 while True:

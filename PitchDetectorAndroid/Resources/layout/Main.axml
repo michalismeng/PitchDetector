@@ -19,5 +19,5 @@
         android:layout_height="wrap_content"
         android:id="@+id/barNoise"
         android:max="100"
-        android:progress="0" />
+        android:progress="85" />
 </LinearLayout>
