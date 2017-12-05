@@ -8,6 +8,7 @@ using Android.Util;
 using System;
 using System.Numerics;
 using System.Linq;
+using Java.Text;
 
 namespace PitchDetectorAndroid
 {
@@ -21,7 +22,8 @@ namespace PitchDetectorAndroid
         const int windowSize = 2048;
         const int sampleRate = 44100;
         const double maxVal = 2;
-        readonly int notesMemory = 5;
+        int notesMemory = 3;
+        int austerity = 6;
 
         private bool shouldContinue = true;
 
@@ -75,8 +77,10 @@ namespace PitchDetectorAndroid
             Button button = FindViewById<Button>(Resource.Id.myButton);
             txtNote = FindViewById<TextView>(Resource.Id.txtNoteFreq);
 
-            button.Click += delegate { CreateAudioThread().Start();
-                                       CreatePitchThread().Start(); };
+            button.Click += delegate {
+                CreateAudioThread().Start();
+                CreatePitchThread().Start();
+            };
 
             for (int i = 0; i < windowSize; i++)
                 timeVector.Add((double)i / sampleRate);
@@ -84,6 +88,9 @@ namespace PitchDetectorAndroid
             Window.AddFlags(Android.Views.WindowManagerFlags.KeepScreenOn);
             SeekBar barNoise = FindViewById<SeekBar>(Resource.Id.barNoise);
             barNoise.ProgressChanged += delegate { Log.Info("Progress", $"Progress bar: {barNoise.Progress}"); };
+
+            // Set frequencies to A4 = 442Hz
+            NoteFrequencies.GenerateNoteFrequencies(442);
         }
 
         Thread CreateAudioThread()
@@ -98,7 +105,7 @@ namespace PitchDetectorAndroid
             return pitchThread;
         }
 
-        (Note, double) DetectPitch(double[] buffer)
+        double DetectPitch(double[] buffer)
         {
             Complex[] input = new Complex[buffer.Length];
 
@@ -112,7 +119,7 @@ namespace PitchDetectorAndroid
             if (input.Length != windowSize)
             {
                 Log.Error("Handle Buffer size", "input buffer not of size window");
-                return (Note.EmptyNote, 0);
+                return 0;
             }
 
             // FFT input buffer and get the right frequencies
@@ -121,13 +128,16 @@ namespace PitchDetectorAndroid
 
             // fourier threshold to reject noise
             if (input.Max(i => i.Real) < FindViewById<SeekBar>(Resource.Id.barNoise).Progress * 10)
-                return (Note.EmptyNote, 0);
+                return 0;
 
             // calculate autocorrelation
-            Complex[] autocor = new Complex[windowSize];
+            Complex[] autocor = input.Select(i => i * Complex.Conjugate(i)).ToArray();
 
-            for (int i = 0; i < windowSize; i++)
-                autocor[i] = input[i] * Complex.Conjugate(input[i]);
+            var temp = (from c in input
+                        orderby c.Magnitude descending
+                        select c).Take(3).ToList();
+
+            Log.Info("Fourier", $"Fourier maximum at: {freqs[input.ToList().FindIndex(i => i == temp[0])]}, {temp[0].Magnitude} {freqs[input.ToList().FindIndex(i => i == temp[1])]}, {temp[1].Magnitude} {freqs[input.ToList().FindIndex(i => i == temp[2])]}, {temp[2].Magnitude}");
 
             // return to time domain
             MathNet.Numerics.IntegralTransforms.Fourier.Radix2Inverse(autocor);
@@ -144,6 +154,12 @@ namespace PitchDetectorAndroid
                                         (maxVal - (1 - maxVal) / (timeVector[0] - timeVector.Last()) * (timeVector[i] - timeVector[0]));
             }
 
+            var cortemp = (from r in result
+                           orderby r descending
+                           select r).Take(2).ToList();
+
+            Log.Info("Correlation", $"Correlation maximum at: {1.0 / timeVector[result.ToList().FindIndex(i => i == cortemp[0])]}, {cortemp[0]} {1.0 / timeVector[result.ToList().FindIndex(i => i == cortemp[1])]}, {cortemp[1]}");
+
             // calculate autocorrelation maximum
             int max = 0;
             for (int i = 0; i < result.Length / 2 + 1; i++)
@@ -151,29 +167,14 @@ namespace PitchDetectorAndroid
                     max = i;
 
             if (max - 1 < 0 || max + 1 >= result.Length)
-                return (Note.EmptyNote, 0);
+                return 0;
 
             double[] p3 = { 1.0 / timeVector[max - 1], result[max - 1] };
             double[] p2 = { 1.0 / timeVector[max], result[max] };
             double[] p1 = { 1.0 / timeVector[max + 1], result[max + 1] };
 
             double max_freq = QuadraticMaximum(p1, p2, p3);
-
-            if (max_freq > 50 && max_freq < 2000)
-            {
-                KeyValuePair<string, double> pair = NoteFrequencies.GetNoteByFrequency(max_freq);
-                pair = new KeyValuePair<string, double>(pair.Key, -pair.Value);
-
-                
-                int noteIndex = NoteFrequencies._Notes.FindIndex(n => n.Name == pair.Key);
-                Note noteEstimation = NoteFrequencies._Notes[noteIndex];               
-
-                //if (Math.Sign(pair.Value) * (max_freq - noteEstimation.Frequency) > threshold)  // played note is above - below limit
-                //    characteristic = Math.Sign(pair.Value).ToString();
-                return (noteEstimation, max_freq);
-            }
-
-            return (Note.EmptyNote, 0);
+            return max_freq;
         }
 
         void HandleAudioData()
@@ -186,11 +187,15 @@ namespace PitchDetectorAndroid
                 var median = MathNet.Filtering.Median.OnlineMedianFilter.CreateDenoise(7);
                 buffer = median.ProcessSamples(buffer);
 
-                var result = DetectPitch(buffer);
+                double detectedFrequency = DetectPitch(buffer);
+                Note noteEstimation;
 
-                Note noteEstimation = result.Item1;
-                double actualFreq = result.Item2;
-                double difference = actualFreq - noteEstimation.Frequency;
+                if (detectedFrequency > 50 && detectedFrequency < 2000)
+                    noteEstimation = NoteFrequencies.GetNoteByFrequency(detectedFrequency);
+                else
+                    noteEstimation = Note.Empty;
+
+                double difference = detectedFrequency - noteEstimation.Frequency;
 
                 string characteristic = "OK";
                 if (noteEstimation.Frequency == 0)
@@ -199,21 +204,21 @@ namespace PitchDetectorAndroid
                     continue;
                 }
 
-                int noteIndex = NoteFrequencies._Notes.FindIndex(n => n.Name == noteEstimation.Name);
-                Note nextNote = NoteFrequencies._Notes[noteIndex + 1 * Math.Sign(difference)];
+                Note nextNote = new Note(difference > 0 ? noteEstimation.Semitone + 1 : noteEstimation.Semitone - 1,
+                                                 NoteFrequencies.GetNoteFrequency(noteEstimation.Frequency, 1 * Math.Sign(difference)));
 
-                double threshold = Math.Sign(difference) * (nextNote.Frequency - noteEstimation.Frequency) / 6;
+                double threshold = Math.Sign(difference) * (nextNote.Frequency - noteEstimation.Frequency) / austerity;
                 double successPercent = (difference / Math.Abs((nextNote.Frequency - noteEstimation.Frequency)) * 100);
 
                 if (difference > 0)
-                    if (actualFreq > noteEstimation.Frequency + threshold)           // played note frequency is above the limit.
+                    if (detectedFrequency > noteEstimation.Frequency + threshold)           // played note frequency is above the limit.
                         characteristic = "+";
                 else
-                    if (actualFreq < noteEstimation.Frequency - threshold)           // played note is below the limit
+                    if (detectedFrequency < noteEstimation.Frequency - threshold)           // played note is below the limit
                         characteristic = "-";
 
                 // when the note vector reaches the given memory size, calculate median and print results
-                if(AppendNote((noteEstimation, actualFreq)))
+                if (AppendNote((noteEstimation, detectedFrequency)))
                 {
                     double meanFreq = GetNotesMedian();
                     ClearNotes();
@@ -257,7 +262,7 @@ namespace PitchDetectorAndroid
             else
                 return notesPlayed[notesPlayed.Count / 2 + 1].Item2;
         }
-       
+
 
         void RecordAudio()
         {
@@ -295,4 +300,3 @@ namespace PitchDetectorAndroid
         }
     }
 }
-
